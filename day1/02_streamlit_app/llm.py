@@ -1,5 +1,6 @@
 # llm.py
 import os
+import re
 import torch
 from transformers import pipeline
 import streamlit as st
@@ -31,57 +32,79 @@ def load_model():
         st.error("GPUメモリ不足の可能性があります。不要なプロセスを終了するか、より小さいモデルの使用を検討してください。")
         return None
 
-def generate_response(pipe, user_question):
-    """LLMを使用して質問に対する回答を生成する"""
+def generate_response(pipe, user_question, num_candidates=3):
+    """LLMを使用して質問に対する回答をnum_candidates個生成し、
+    その中からベストなものをモデルに選ばせる"""
     if pipe is None:
-        return "モデルがロードされていないため、回答を生成できません。", 0
+        return {
+            "best_answer": "モデルがロードされていないため、回答を生成できません。",
+            "response_time": 0.0,
+            "candidates": [],
+            "best_index": -1,
+            "justification": ""
+        }
 
-    try:
-        start_time = time.time()
-        messages = [
-            {"role": "user", "content": user_question},
-        ]
-        # max_new_tokensを調整可能にする（例）
-        outputs = pipe(messages, max_new_tokens=512, do_sample=True, temperature=0.7, top_p=0.9)
+    start_time = time.time()
+    message = [{"role": "user", "content": user_question}]
 
-        # Gemmaの出力形式に合わせて調整が必要な場合がある
-        # 最後のassistantのメッセージを取得
-        assistant_response = ""
-        if outputs and isinstance(outputs, list) and outputs[0].get("generated_text"):
-           if isinstance(outputs[0]["generated_text"], list) and len(outputs[0]["generated_text"]) > 0:
-               # messages形式の場合
-               last_message = outputs[0]["generated_text"][-1]
-               if last_message.get("role") == "assistant":
-                   assistant_response = last_message.get("content", "").strip()
-           elif isinstance(outputs[0]["generated_text"], str):
-               # 単純な文字列の場合（古いtransformers？） - プロンプト部分を除く処理が必要かも
-               # この部分はモデルやtransformersのバージョンによって調整が必要
-               full_text = outputs[0]["generated_text"]
-               # 簡単な方法：ユーザーの質問以降の部分を取得
-               prompt_end = user_question
-               response_start_index = full_text.find(prompt_end) + len(prompt_end)
-               # 応答部分のみを抽出（より堅牢な方法が必要な場合あり）
-               possible_response = full_text[response_start_index:].strip()
-               # 特定の開始トークンを探すなど、モデルに合わせた調整
-               if "<start_of_turn>model" in possible_response:
-                    assistant_response = possible_response.split("<start_of_turn>model\n")[-1].strip()
-               else:
-                    assistant_response = possible_response # フォールバック
+    # 候補の作成
+    candidates = []
+    for _ in range(num_candidates):
+        outputs = pipe(
+            message,
+            max_length=512,
+            do_sample=True,
+            top_p=0.95,
+            temperature=0.7,
+            num_return_sequences=1
+        )
+        answer = ""
 
-        if not assistant_response:
-             # 上記で見つからない場合のフォールバックやデバッグ
-             print("Warning: Could not extract assistant response. Full output:", outputs)
-             assistant_response = "回答の抽出に失敗しました。"
+        if outputs and isinstance(outputs, list):
+            gen = outputs[0].get('generated_text', "")
+            if isinstance(gen, list):
+                last = gen[-1]
+                if last.get("role") == "assistant":
+                    answer = last.get("content", "").strip()
+            else:
+                answer = gen.strip()
+        candidates.append(answer)
 
 
-        end_time = time.time()
-        response_time = end_time - start_time
-        print(f"Generated response in {response_time:.2f}s") # デバッグ用
-        return assistant_response, response_time
+    # ベストな回答を選択
+    eval_prompt = (
+        "以下のユーザーの質問と3つの回答候補を読み、最も優れた回答を1つ選んでください。\n"
+        "まず 'index:' の後に 1,2,3 の番号を示し、改行して '理由:' の後にその選択理由を述べてください。\n\n"
+        f"ユーザーの質問:\n{user_question}\n\n"
+        f"回答候補:\n"
+        f"1) {candidates[0]}\n\n"
+        f"2) {candidates[1]}\n\n"
+        f"3) {candidates[2]}"
+    )
 
-    except Exception as e:
-        st.error(f"回答生成中にエラーが発生しました: {e}")
-        # エラーの詳細をログに出力
-        import traceback
-        traceback.print_exc()
-        return f"エラーが発生しました: {str(e)}", 0
+    eval_outputs = pipe(
+        eval_prompt,
+        max_new_tokens=256,
+        do_sample=False,
+        temperature=0.0,)
+
+    eval_text = ""
+    if eval_outputs and isinstance(eval_outputs, list):
+        eval_text = eval_outputs[0].get('generated_text', "")
+        if isinstance(eval_text, list):
+            eval_text = eval_text[-1].get("content", "")
+    m_idx = re.search(r'index[:：]?\s*(\d)', eval_text, re.IGNORECASE)
+    best_index = int(m_idx.group(1)) - 1 if m_idx else 0
+    m_reason = re.search(r'(?:理由|justification)[:：]?\s*(.*)', eval_text, re.DOTALL | re.IGNORECASE)
+    justification = m_reason.group(1).strip() if m_reason else eval_text.strip()
+
+    best_answer = candidates[best_index]
+    response_time = time.time() - start_time
+
+    return {
+        "best_answer": best_answer,
+        "response_time": response_time,
+        "candidates": candidates,
+        "best_index": best_index,
+        "justification": justification
+    }

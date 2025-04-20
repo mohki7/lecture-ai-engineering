@@ -45,6 +45,32 @@ def load_model():
         return None
 pipe = llm.load_model()
 
+def display_chat_page(pipe):
+    st.header("チャット")
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+
+    with st.form(key="chat_form", clear_on_submit=True):
+        user_question = st.text_area("質問を入力してください ✏️", height=100)
+        submitted = st.form_submit_button("送信")
+    if submitted and user_question:
+        result = llm.generate_response(pipe, user_question)
+        st.session_state.chat_history.append({
+            "question": user_question,
+            **result
+        })
+
+    # --- 表示 ---
+    for entry in reversed(st.session_state.chat_history):
+        st.markdown(f"**質問：** {entry['question']}")
+        st.markdown(f"**候補1：**\n{entry['candidates'][0]}")
+        st.markdown(f"**候補2：**\n{entry['candidates'][1]}")
+        st.markdown(f"**候補3：**\n{entry['candidates'][2]}")
+        st.markdown(f"**選ばれた回答：**\n{entry['best_answer']}")
+        st.markdown(f"**選んだ理由：**\n{entry['justification']}")
+        st.markdown('---')
+
+
 # --- Streamlit アプリケーション ---
 st.title("🤖 Gemma 2 Chatbot with Feedback")
 st.write("Gemmaモデルを使用したチャットボットです。回答に対してフィードバックを行えます。")
@@ -68,7 +94,8 @@ page = st.sidebar.radio(
 # --- メインコンテンツ ---
 if st.session_state.page == "チャット":
     if pipe:
-        ui.display_chat_page(pipe)
+        # ui.display_chat_page(pipe)
+        display_chat_page(pipe)
     else:
         st.error("チャット機能を利用できません。モデルの読み込みに失敗しました。")
 elif st.session_state.page == "履歴閲覧":
