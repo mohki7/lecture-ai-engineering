@@ -185,9 +185,7 @@ def test_compare_with_previous_model(sample_data):
     # テストデータの準備
     X = sample_data.drop("Survived", axis=1)
     y = sample_data["Survived"].astype(int)
-    _, X_test, _, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     # モデルのロード
     with open(prev_model_path, "rb") as f:
@@ -203,6 +201,7 @@ def test_compare_with_previous_model(sample_data):
 
     # 推論時間比較
     import time
+
     start_prev = time.time()
     prev_model.predict(X_test)
     end_prev = time.time()
@@ -214,7 +213,11 @@ def test_compare_with_previous_model(sample_data):
     curr_time = end_curr - start_curr
 
     # 精度が1%以上低下していないか
-    assert curr_acc >= prev_acc - 0.01, f"現行モデルの精度が過去モデルより1%以上低下しています: {curr_acc} vs {prev_acc}"
+    assert (
+        curr_acc >= prev_acc - 0.01
+    ), f"現行モデルの精度が過去モデルより1%以上低下しています: {curr_acc} vs {prev_acc}"
 
     # 推論時間が大幅に悪化していないか（2倍以上遅くなっていないか）
-    assert curr_time <= prev_time * 2, f"現行モデルの推論時間が過去モデルの2倍以上になっています: {curr_time:.4f}s vs {prev_time:.4f}s"
+    assert (
+        curr_time <= prev_time * 2
+    ), f"現行モデルの推論時間が過去モデルの2倍以上になっています: {curr_time:.4f}s vs {prev_time:.4f}s"
