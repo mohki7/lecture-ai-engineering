@@ -171,3 +171,50 @@ def test_model_reproducibility(sample_data, preprocessor):
     assert np.array_equal(
         predictions1, predictions2
     ), "モデルの予測結果に再現性がありません"
+
+
+def test_compare_with_previous_model(sample_data):
+    """現行モデルと過去モデルの精度・推論時間を比較し、性能劣化がないか検証"""
+    prev_model_path = os.path.join(MODEL_DIR, "titanic_model_v1.pkl")
+    curr_model_path = MODEL_PATH
+
+    # モデルが両方存在することを確認
+    if not (os.path.exists(prev_model_path) and os.path.exists(curr_model_path)):
+        pytest.skip("比較対象のモデルファイルが存在しません")
+
+    # テストデータの準備
+    X = sample_data.drop("Survived", axis=1)
+    y = sample_data["Survived"].astype(int)
+    _, X_test, _, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    # モデルのロード
+    with open(prev_model_path, "rb") as f:
+        prev_model = pickle.load(f)
+    with open(curr_model_path, "rb") as f:
+        curr_model = pickle.load(f)
+
+    # 精度比較
+    prev_pred = prev_model.predict(X_test)
+    curr_pred = curr_model.predict(X_test)
+    prev_acc = accuracy_score(y_test, prev_pred)
+    curr_acc = accuracy_score(y_test, curr_pred)
+
+    # 推論時間比較
+    import time
+    start_prev = time.time()
+    prev_model.predict(X_test)
+    end_prev = time.time()
+    prev_time = end_prev - start_prev
+
+    start_curr = time.time()
+    curr_model.predict(X_test)
+    end_curr = time.time()
+    curr_time = end_curr - start_curr
+
+    # 精度が1%以上低下していないか
+    assert curr_acc >= prev_acc - 0.01, f"現行モデルの精度が過去モデルより1%以上低下しています: {curr_acc} vs {prev_acc}"
+
+    # 推論時間が大幅に悪化していないか（2倍以上遅くなっていないか）
+    assert curr_time <= prev_time * 2, f"現行モデルの推論時間が過去モデルの2倍以上になっています: {curr_time:.4f}s vs {prev_time:.4f}s"
